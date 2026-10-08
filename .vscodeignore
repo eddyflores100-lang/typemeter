@@ -1,0 +1,13 @@
+.vscode/**
+src/**
+test/**
+scripts/**
+node_modules/**
+*.md
+!README.md
+!LICENSE
+esbuild.js
+tsconfig.worker.json
+tsconfig.json
+.gitignore
+SUBMISSION.md

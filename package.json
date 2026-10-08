@@ -1,0 +1,97 @@
+{
+  "name": "typemeter",
+  "displayName": "TypeMeter — TS type load-time & complexity",
+  "description": "Compiler-level measurement of TypeScript type load-time, complexity and cost attribution — measured inside the checker, not guessed from strings.",
+  "version": "0.1.0",
+  "publisher": "eddyflores100-lang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eddyflores100-lang/typemeter"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Testing",
+    "Visualization"
+  ],
+  "keywords": [
+    "typescript",
+    "performance",
+    "type complexity",
+    "tsserver",
+    "tsperf"
+  ],
+  "activationEvents": [
+    "onCommand:typemeter.measureProject",
+    "onCommand:typemeter.measureAtCursor",
+    "onCommand:typemeter.showLeaderboard",
+    "onCommand:typemeter.showDetail",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact"
+  ],
+  "main": "./dist/extension.js",
+  "bin": {
+    "typemeter": "./dist/cli.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "typemeter.measureProject",
+        "title": "TypeMeter: Measure Project Types",
+        "category": "TypeMeter"
+      },
+      {
+        "command": "typemeter.measureAtCursor",
+        "title": "TypeMeter: Measure Type at Cursor (isolated)",
+        "category": "TypeMeter"
+      },
+      {
+        "command": "typemeter.showLeaderboard",
+        "title": "TypeMeter: Show Slowest Types",
+        "category": "TypeMeter"
+      },
+      {
+        "command": "typemeter.showDetail",
+        "title": "TypeMeter: Show Declaration Detail",
+        "category": "TypeMeter"
+      }
+    ],
+    "configuration": {
+      "title": "TypeMeter",
+      "properties": {
+        "typemeter.watchOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Re-measure automatically after saves (debounced)."
+        },
+        "typemeter.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show per-declaration CodeLens with cost metrics."
+        },
+        "typemeter.topN": {
+          "type": "number",
+          "default": 50,
+          "description": "Rows shown in the leaderboard webview."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build:ext && npm run build:worker && npm run vendor",
+    "build:ext": "node esbuild.js",
+    "build:worker": "tsc -p tsconfig.worker.json",
+    "vendor": "node scripts/vendor-typescript.js",
+    "test": "node test/run-tests.js",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}
