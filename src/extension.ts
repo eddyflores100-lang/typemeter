@@ -6,9 +6,12 @@ import { TypeMeterCodeLensProvider } from './provider/codelens';
 import { TypeMeterHoverProvider } from './provider/hover';
 import { openLeaderboard } from './provider/leaderboard';
 import { openDetail } from './provider/detail';
+import { openCrossCheckView } from './provider/xcheckview';
+import { runCrossCheck, CrossCheckReport } from './engine/xcheck';
 
 let state: MeasurementState;
 let statusItem: vscode.StatusBarItem;
+let lastCrossCheck: CrossCheckReport | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   state = new MeasurementState();
@@ -93,8 +96,35 @@ function registerCommands(context: vscode.ExtensionContext): vscode.Disposable {
     openDetail(r);
   };
 
+  const runXCheck = async (): Promise<void> => {
+    const target = await pickTsconfig();
+    if (!target) return;
+    try {
+      const summary = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'TypeMeter: measuring declarations',
+          cancellable: true,
+        },
+        (progress, token) => runMeasurement(context.extensionPath, { ...target, token })
+      );
+      state.set(summary);
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'TypeMeter: running tsc cross-check' },
+        () =>
+          runCrossCheck(target.projectDir, target.tsconfig, summary).then((r) => {
+            lastCrossCheck = r;
+          })
+      );
+      openCrossCheckView({ get summary() { return state.summary; } }, { get report() { return lastCrossCheck; } });
+    } catch (e) {
+      vscode.window.showErrorMessage(`TypeMeter: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   return vscode.Disposable.from(
     vscode.commands.registerCommand('typemeter.measureProject', () => measure(false)),
+    vscode.commands.registerCommand('typemeter.crossCheck', () => runXCheck()),
     vscode.commands.registerCommand('typemeter.measureAtCursor', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;

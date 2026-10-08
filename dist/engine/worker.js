@@ -33,6 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.resolveTypeScript = resolveTypeScript;
+exports.resolveTypeScriptModule = resolveTypeScript;
 /**
  * TypeMeter measurement worker.
  *
@@ -55,13 +57,25 @@ function resolveTypeScript(projectDir) {
     const candidates = [
         { p: path.join(projectDir, 'node_modules', 'typescript'), source: 'project' },
         { p: path.join(__dirname, '..', '..', 'node_modules', 'typescript'), source: 'bundled' },
-        { p: path.join(__dirname, '..', 'vendor', 'typescript', 'lib', 'typescript.js'), source: 'vendored' },
+        // vendor/ sits at the PACKAGE root (repo root / VSIX root) — from
+        // dist/engine that is '../..'; a '..'-only path silently resolves to
+        // dist/vendor/ which exists nowhere (found while validating fresh-clone
+        // runs without node_modules).
+        { p: path.join(__dirname, '..', '..', 'vendor', 'typescript', 'lib', 'typescript.js'), source: 'vendored' },
     ];
     for (const c of candidates) {
         try {
             const mod = require2(c.p);
             if (mod && typeof mod.createLanguageService === 'function') {
-                return { module: mod, source: c.source, version: mod.version };
+                // location of the tsc CLI sibling of the resolved lib
+                let binPath;
+                try {
+                    binPath = require2.resolve('typescript/bin/tsc', { paths: [path.dirname(require2.resolve(c.p))] });
+                }
+                catch {
+                    binPath = path.join(c.p, 'bin', 'tsc');
+                }
+                return { module: mod, source: c.source, version: mod.version, binPath };
             }
         }
         catch {
@@ -146,7 +160,7 @@ function main() {
             const sf = program.getSourceFile(file);
             if (!sf)
                 continue;
-            const decls = (0, declarations_1.collectDeclarations)(sf, checker);
+            const decls = (0, declarations_1.collectDeclarations)(sf, checker, T);
             for (const d of decls) {
                 const target = d.nameNode ?? d.node;
                 const inst0 = readInstantiations(checker);
@@ -161,7 +175,7 @@ function main() {
                 }
                 let w = null;
                 try {
-                    w = type ? (0, structwalk_1.walkType)(type, checker) : null;
+                    w = type ? (0, structwalk_1.walkType)(type, checker, T) : null;
                 }
                 catch {
                     w = null;
@@ -210,7 +224,7 @@ function main() {
                 results.push(pushed);
                 if (w)
                     walkRefsPerDecl.set(pushed, w.refs);
-                astRefsPerDecl.set(pushed, (0, astrefs_1.collectTypeRefs)(d.node));
+                astRefsPerDecl.set(pushed, (0, astrefs_1.collectTypeRefs)(d.node, T));
             }
             done++;
             emit({ type: 'progress', done, total: projectFiles.length, file: path.basename(file) });
@@ -241,6 +255,9 @@ function main() {
             matched.sort((a, b) => (b.ms ?? 0) - (a.ms ?? 0));
             r.attribution = matched.slice(0, 5);
         }
+        // cumulative compiler counters after the sweep — the cross-check anchors
+        const finalInstantiations = readInstantiations(checker);
+        const finalTypes = readTypeCount(checker);
         const summary = {
             projectDir,
             tsconfig: cfgPath,
@@ -250,6 +267,8 @@ function main() {
             declCount: results.length,
             totalMs: Math.round(results.reduce((s, r) => s + r.firstTouchMs, 0) * 1000) / 1000,
             programMs: Math.round(programMs * 1000) / 1000,
+            finalInstantiations,
+            finalTypes,
             results: results.sort((a, b) => b.firstTouchMs - a.firstTouchMs),
         };
         emit({ type: 'summary', summary });

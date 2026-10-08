@@ -23,3 +23,16 @@ for (const f of fs.readdirSync(src)) {
   }
 }
 console.log(`vendored ${count} files -> vendor/typescript/lib`);
+
+// also vendor the tsc CLI entry so the cross-check can run the vendored
+// compiler in fresh clones without node_modules
+try {
+  const binSrc = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc');
+  const binDst = path.join(__dirname, '..', 'vendor', 'typescript', 'bin', 'tsc');
+  fs.mkdirSync(path.dirname(binDst), { recursive: true });
+  fs.copyFileSync(binSrc, binDst);
+  fs.chmodSync(binDst, 0o755);
+  console.log('vendored tsc CLI -> vendor/typescript/bin/tsc');
+} catch (e) {
+  console.log(`(tsc CLI not vendored: ${e.message})`);
+}

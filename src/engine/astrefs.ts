@@ -1,8 +1,15 @@
-/** AST-level type references of a declaration — robust attribution source. */
+/** AST-level type references of a declaration — robust attribution source.
+ *
+ * `T` must be the same TypeScript instance that produced the AST (see
+ * declarations.ts for why SyntaxKind predicates must match the program's
+ * compiler instance).
+ */
 import ts from 'typescript';
 
-function entityNameText(e: ts.EntityName): string {
-  return ts.isQualifiedName(e) ? entityNameText(e.right) : e.text;
+type TS = typeof ts;
+
+function entityNameText(e: ts.EntityName, T: TS): string {
+  return T.isQualifiedName(e) ? entityNameText((e as ts.QualifiedName).right, T) : (e as ts.Identifier).text;
 }
 
 /**
@@ -10,25 +17,25 @@ function entityNameText(e: ts.EntityName): string {
  * declaration: annotations, generics, heritage clauses (`extends`/`implements`),
  * return types, parameter types. Returns name -> occurrence count.
  */
-export function collectTypeRefs(root: ts.Node): Map<string, number> {
+export function collectTypeRefs(root: ts.Node, T: TS): Map<string, number> {
   const refs = new Map<string, number>();
   const bump = (name: string) => {
     if (name) refs.set(name, (refs.get(name) ?? 0) + 1);
   };
   const visit = (node: ts.Node): void => {
-    if (ts.isTypeReferenceNode(node)) {
-      bump(entityNameText(node.typeName));
-    } else if (ts.isExpressionWithTypeArguments(node)) {
+    if (T.isTypeReferenceNode(node)) {
+      bump(entityNameText(node.typeName, T));
+    } else if (T.isExpressionWithTypeArguments(node)) {
       const e = node.expression;
-      if (ts.isIdentifier(e)) bump(e.text);
-    } else if (ts.isImportTypeNode(node)) {
+      if (T.isIdentifier(e)) bump(e.text);
+    } else if (T.isImportTypeNode(node)) {
       // import("...").Type — attr to the qualifier if present
-      if (node.qualifier) bump(entityNameText(node.qualifier));
-    } else if (ts.isTypeQueryNode(node)) {
+      if (node.qualifier) bump(entityNameText(node.qualifier, T));
+    } else if (T.isTypeQueryNode(node)) {
       // typeof X
-      if (ts.isIdentifier(node.exprName)) bump(node.exprName.text);
+      if (T.isIdentifier(node.exprName)) bump(node.exprName.text);
     }
-    ts.forEachChild(node, visit);
+    T.forEachChild(node, visit);
   };
   visit(root);
   return refs;

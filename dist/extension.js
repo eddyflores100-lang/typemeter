@@ -34,7 +34,7 @@ __export(extension_exports, {
   deactivate: () => deactivate
 });
 module.exports = __toCommonJS(extension_exports);
-var vscode7 = __toESM(require("vscode"));
+var vscode8 = __toESM(require("vscode"));
 
 // src/state.ts
 var vscode = __toESM(require("vscode"));
@@ -100,7 +100,7 @@ function workerPath(extensionPath) {
   return path.join(extensionPath, "dist", "engine", "worker.js");
 }
 function runMeasurement(extensionPath, opts) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve2, reject) => {
     const args = [workerPath(extensionPath), "--project", opts.projectDir];
     if (opts.tsconfig) args.push("--tsconfig", opts.tsconfig);
     const cp = (0, import_child_process.spawn)(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -138,7 +138,7 @@ function runMeasurement(extensionPath, opts) {
           opts.onProgress?.(parsed.done, parsed.total, parsed.file);
         } else if (parsed.type === "summary") {
           const s = parsed.summary;
-          finish(() => resolve(s));
+          finish(() => resolve2(s));
           try {
             cp.kill();
           } catch {
@@ -408,12 +408,352 @@ function relPath2(r) {
   return parts.slice(-2).join("/");
 }
 
+// src/provider/xcheckview.ts
+var vscode7 = __toESM(require("vscode"));
+function esc3(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+function openCrossCheckView(getSummary, getReport) {
+  const report = getReport.report;
+  const summary = getSummary.summary;
+  if (!report || !summary) {
+    vscode7.window.showWarningMessage("TypeMeter: run the cross-check first.");
+    return;
+  }
+  const panel = vscode7.window.createWebviewPanel(
+    "typemeter.crosscheck",
+    "TypeMeter \u2014 Cross-check vs tsc",
+    vscode7.ViewColumn.One,
+    {}
+  );
+  const cov = (v) => v === null ? "n/a" : `${(v * 100).toFixed(1)}%`;
+  const num = (v) => v === null ? "n/a" : v.toLocaleString();
+  const ms = (v) => v === null ? "n/a" : `${v.toFixed(1)} ms`;
+  const histRows = report.perFile.histogram.map(
+    (h) => `<tr>
+        <td class="num">${h.tscMs.toFixed(1)}</td>
+        <td class="num">${h.sweepMs.toFixed(1)}</td>
+        <td class="num">${h.decls}</td>
+        <td class="loc">${esc3(h.file)}</td>
+      </tr>`
+  ).join("");
+  const notes = report.notes.length ? `<ul class="notes">${report.notes.map((n) => `<li>${esc3(n)}</li>`).join("")}</ul>` : "";
+  panel.webview.html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 12px; }
+  h1 { font-size: 15px; }
+  h2 { font-size: 13px; margin-top: 16px; }
+  .meta { color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+  th { color: var(--vscode-descriptionForeground); font-weight: 500; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.loc { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); }
+  .big { font-size: 14px; }
+  .oom { color: var(--vscode-errorForeground); }
+  .caveat, .notes { color: var(--vscode-descriptionForeground); font-size: 11px; }
+</style></head>
+<body>
+  <h1>TypeMeter \u2014 cross-check vs tsc</h1>
+  <div class="meta">tsc ${esc3(report.tsc.version ?? "(n/a)")} \xB7 --noEmit --extendedDiagnostics --generateTrace \xB7
+    exit ${esc3(String(report.tsc.exitCode ?? "null"))}${report.tsc.oom ? ' \xB7 <span class="oom">OOM KILLED \u2014 partial trace parsed, reported honestly</span>' : ""}</div>
+
+  <h2>Counter identity (the anchors)</h2>
+  <table>
+    <thead><tr><th></th><th class="num">instantiations</th><th class="num">types</th></tr></thead>
+    <tbody>
+      <tr><td>TypeMeter sweep</td><td class="num">${report.counters.sweepInstantiations.toLocaleString()}</td><td class="num">${report.counters.sweepTypes.toLocaleString()}</td></tr>
+      <tr><td>full tsc run</td><td class="num">${num(report.counters.tscInstantiations)}</td><td class="num">${num(report.counters.tscTypes)}</td></tr>
+      <tr><td>coverage</td><td class="num">${cov(report.counters.instantiationCoverage)}</td><td class="num">${cov(report.counters.typeCoverage)}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Cold-start totals</h2>
+  <table>
+    <tbody>
+      <tr><td>tsc checkSourceFile total (project files)</td><td class="num">${ms(report.coldStart.tscCheckMs)}</td></tr>
+      <tr><td>TypeMeter first-touch total</td><td class="num">${ms(report.coldStart.sweepFirstTouchMs)}</td></tr>
+      <tr><td>program construction</td><td class="num">${ms(report.coldStart.programMs)}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Per-file histogram (top ${report.perFile.histogram.length})${report.perFile.pearson !== null ? ` \xB7 Pearson r = ${report.perFile.pearson}` : ""}</h2>
+  <table>
+    <thead><tr><th class="num">tsc ms</th><th class="num">sweep ms</th><th class="num">decls</th><th>file</th></tr></thead>
+    <tbody>${histRows}</tbody>
+  </table>
+  <p class="caveat">${esc3(report.perFile.caveat)}</p>
+  ${notes}
+</body></html>`;
+}
+
+// src/engine/xcheck.ts
+var import_child_process2 = require("child_process");
+var fs = __toESM(require("fs"));
+var os = __toESM(require("os"));
+var path2 = __toESM(require("path"));
+var import_module = require("module");
+var require2 = (0, import_module.createRequire)(__filename);
+function parseDiagnostics(stdout) {
+  const d = {
+    instantiations: null,
+    types: null,
+    checkTimeMs: null,
+    totalTimeMs: null
+  };
+  const line = (key) => {
+    const m = stdout.match(new RegExp(`^${key}:\\s+([\\d.,]+)\\s*(s|ms)?\\b`, "mi"));
+    if (!m) return null;
+    const v = parseFloat(m[1].replace(/,/g, ""));
+    if (!Number.isFinite(v)) return null;
+    if (m[2] === "s") return v * 1e3;
+    return v;
+  };
+  d.instantiations = line("Instantiations");
+  d.types = line("Types");
+  d.checkTimeMs = line("Check time");
+  d.totalTimeMs = line("Total time");
+  return d;
+}
+function parseTraceFileEvents(tracePath) {
+  const perFileMs = /* @__PURE__ */ new Map();
+  const open = /* @__PURE__ */ new Map();
+  let eventsSeen = 0;
+  let brokenLines = 0;
+  const fd = fs.openSync(tracePath, "r");
+  const CHUNK = 1 << 20;
+  const buf = Buffer.alloc(CHUNK);
+  let carry = "";
+  const handleLine = (raw) => {
+    let line = raw.trim();
+    if (!line || line === "[" || line === "]") return;
+    if (line.startsWith("[{")) line = line.slice(1);
+    if (line.endsWith(",")) line = line.slice(0, -1);
+    if (line.endsWith("]")) line = line.slice(0, -1);
+    if (!line.startsWith("{")) return;
+    let ev;
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      brokenLines++;
+      return;
+    }
+    if (ev.ph === "B" && ev.name && typeof ev.ts === "number") {
+      open.set(`${ev.name}@${ev.args?.pos ?? -1}`, ev.ts);
+    } else if (ev.ph === "E" && ev.name && typeof ev.ts === "number") {
+      const key = `${ev.name}@${ev.args?.pos ?? -1}`;
+      const begin = open.get(key);
+      if (begin !== void 0) {
+        open.delete(key);
+        const durMs = (ev.ts - begin) / 1e3;
+        const file = ev.args?.file ?? ev.args?.path;
+        if (ev.name === "checkSourceFile" && file && durMs >= 0) {
+          perFileMs.set(file, (perFileMs.get(file) ?? 0) + durMs);
+        }
+      }
+    }
+    eventsSeen++;
+  };
+  try {
+    while (true) {
+      const n = fs.readSync(fd, buf, 0, CHUNK, null);
+      if (n === 0) break;
+      const text = carry + buf.toString("utf8", 0, n);
+      const lines = text.split("\n");
+      carry = lines.pop() ?? "";
+      for (const raw of lines) handleLine(raw);
+    }
+    const tail = carry.trim();
+    if (tail.length > 0) handleLine(tail);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const truncated = brokenLines > 0 || !endsWithClosedArray(tracePath);
+  return { perFileMs, eventsSeen, truncated };
+}
+function endsWithClosedArray(p) {
+  const size = fs.statSync(p).size;
+  if (size === 0) return true;
+  const fd = fs.openSync(p, "r");
+  try {
+    const len = Math.min(size, 8);
+    const b = Buffer.alloc(len);
+    fs.readSync(fd, b, 0, len, size - len);
+    const tail = b.toString("utf8").trimEnd();
+    return tail.endsWith("]");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+function pearson(xs, ys) {
+  const n = Math.min(xs.length, ys.length);
+  if (n < 3) return null;
+  const mx = xs.reduce((s, v) => s + v, 0) / n;
+  const my = ys.reduce((s, v) => s + v, 0) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) {
+    const a = xs[i] - mx;
+    const b = ys[i] - my;
+    num += a * b;
+    dx += a * a;
+    dy += b * b;
+  }
+  const den = Math.sqrt(dx * dy);
+  if (den === 0) return null;
+  return num / den;
+}
+function resolveTscBin(projectDir, tsconfig) {
+  const cands = [
+    path2.join(projectDir, "node_modules", "typescript", "bin", "tsc"),
+    path2.join(__dirname, "..", "..", "node_modules", "typescript", "bin", "tsc"),
+    path2.join(__dirname, "..", "..", "vendor", "typescript", "bin", "tsc")
+  ];
+  let dir = path2.dirname(path2.resolve(tsconfig));
+  for (let i = 0; i < 6 && dir.length > 3; i++) {
+    cands.unshift(path2.join(dir, "node_modules", "typescript", "bin", "tsc"));
+    dir = path2.dirname(dir);
+  }
+  for (const c of cands) {
+    if (fs.existsSync(c)) {
+      let version = null;
+      try {
+        const mod = require2(path2.join(path2.dirname(c), "..", "lib", "typescript.js"));
+        version = mod?.version ?? null;
+      } catch {
+      }
+      return { bin: c, version };
+    }
+  }
+  return { bin: "tsc", version: null };
+}
+function runCrossCheck(projectDir, tsconfig, sweep, opts = {}) {
+  const cfg = tsconfig ?? sweep.tsconfig;
+  const { bin, version } = resolveTscBin(projectDir, cfg);
+  const traceDir = fs.mkdtempSync(path2.join(os.tmpdir(), "typemeter-xcheck-"));
+  const notes = [];
+  return new Promise((resolve2) => {
+    const args = [
+      bin,
+      "--noEmit",
+      "--extendedDiagnostics",
+      "--generateTrace",
+      traceDir,
+      "-p",
+      path2.resolve(cfg),
+      ...opts.tscArgs ?? []
+    ];
+    const cp = (0, import_child_process2.spawn)(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    cp.stdout.setEncoding("utf8");
+    cp.stdout.on("data", (c) => stdout += c);
+    cp.stderr.setEncoding("utf8");
+    cp.stderr.on("data", (c) => stderr += c);
+    const timeout = setTimeout(() => {
+      try {
+        cp.kill("SIGKILL");
+      } catch {
+      }
+    }, opts.timeoutMs ?? 20 * 60 * 1e3);
+    timeout.unref();
+    const finish = (exitCode, signal) => {
+      clearTimeout(timeout);
+      const diagnostics = parseDiagnostics(stdout);
+      const oom = signal === "SIGKILL" || /heap out of memory/i.test(stderr) || /OOM/i.test(stderr);
+      const killed = signal !== null;
+      if (killed) notes.push(`tsc was terminated (signal ${signal}) \u2014 partial results are still compared.`);
+      if (oom) notes.push("tsc exhausted memory (OOM kill) \u2014 the partial trace was parsed and the kill is reported, not hidden.");
+      const tracePath = path2.join(traceDir, "trace.json");
+      let perFileMs = /* @__PURE__ */ new Map();
+      let eventsSeen = 0;
+      let truncated = false;
+      if (fs.existsSync(tracePath)) {
+        ({ perFileMs, eventsSeen, truncated } = parseTraceFileEvents(tracePath));
+      } else {
+        notes.push("no trace.json produced (tsc failed before tracing started).");
+      }
+      if (truncated) notes.push("trace.json is truncated (tsc killed mid-write); parsed event-by-event, broken tail skipped.");
+      try {
+        fs.rmSync(traceDir, { recursive: true, force: true });
+      } catch {
+      }
+      const tscInst = diagnostics.instantiations;
+      const tscTypes = diagnostics.types;
+      const instCov = tscInst && tscInst > 0 ? sweep.finalInstantiations / tscInst : null;
+      const typeCov = tscTypes && tscTypes > 0 ? sweep.finalTypes / tscTypes : null;
+      if (tscInst === null && oom) {
+        notes.push("tsc died before printing Instantiations \u2014 coverage computed against the partial trace only.");
+      }
+      const norm = (f) => f.replace(/\\/g, "/");
+      const sweepPerFile = /* @__PURE__ */ new Map();
+      for (const r2 of sweep.results) {
+        const k = norm(r2.file);
+        const cur = sweepPerFile.get(k) ?? { ms: 0, decls: 0 };
+        cur.ms += r2.firstTouchMs;
+        cur.decls += 1;
+        sweepPerFile.set(k, cur);
+      }
+      const hist = [];
+      const xs = [];
+      const ys = [];
+      let tscProjectMs = 0;
+      let seenProjectFiles = 0;
+      for (const [file, ms] of perFileMs) {
+        const k = norm(file);
+        const sw = sweepPerFile.get(k);
+        if (!sw) continue;
+        tscProjectMs += ms;
+        seenProjectFiles++;
+        hist.push({ file: path2.basename(file), tscMs: Math.round(ms * 10) / 10, sweepMs: Math.round(sw.ms * 10) / 10, decls: sw.decls });
+        xs.push(ms);
+        ys.push(sw.ms);
+      }
+      const tscCheckMs = seenProjectFiles > 0 ? tscProjectMs : null;
+      hist.sort((a, b) => b.tscMs - a.tscMs);
+      const r = pearson(xs, ys);
+      const report = {
+        ok: perFileMs.size > 0 || diagnostics.instantiations !== null,
+        tsc: { version, bin, exitCode, signal, killed, oom, diagnostics },
+        counters: {
+          sweepInstantiations: sweep.finalInstantiations,
+          sweepTypes: sweep.finalTypes,
+          tscInstantiations: tscInst,
+          tscTypes,
+          instantiationCoverage: instCov === null ? null : Math.round(instCov * 1e3) / 1e3,
+          typeCoverage: typeCov === null ? null : Math.round(typeCov * 1e3) / 1e3
+        },
+        coldStart: {
+          tscCheckMs: tscCheckMs === null ? null : Math.round(tscCheckMs * 10) / 10,
+          sweepFirstTouchMs: Math.round(sweep.totalMs * 10) / 10,
+          programMs: sweep.programMs
+        },
+        perFile: {
+          histogram: hist.slice(0, 12),
+          pearson: r === null ? null : Math.round(r * 1e3) / 1e3,
+          caveat: "marginal first-touch redistributes shared prerequisites to whoever touches them first; per-file histograms are expected to differ \u2014 the totals and the compiler counters are the anchors."
+        },
+        notes
+      };
+      if (eventsSeen) {
+        report.eventsSeen = eventsSeen;
+      }
+      resolve2(report);
+    };
+    cp.on("error", (e) => {
+      notes.push(`failed to launch tsc: ${e.message}`);
+      finish(null, null);
+    });
+    cp.on("close", (code, signal) => finish(code, signal));
+  });
+}
+
 // src/extension.ts
 var state;
 var statusItem;
+var lastCrossCheck = null;
 function activate(context) {
   state = new MeasurementState();
-  statusItem = vscode7.window.createStatusBarItem(vscode7.StatusBarAlignment.Right, 90);
+  statusItem = vscode8.window.createStatusBarItem(vscode8.StatusBarAlignment.Right, 90);
   statusItem.text = "$(graph) TypeMeter";
   statusItem.tooltip = "Run TypeMeter to measure type load-time and complexity";
   statusItem.command = "typemeter.measureProject";
@@ -424,8 +764,8 @@ function activate(context) {
   ];
   context.subscriptions.push(
     statusItem,
-    vscode7.languages.registerCodeLensProvider(docSelector, new TypeMeterCodeLensProvider(state)),
-    vscode7.languages.registerHoverProvider(docSelector, new TypeMeterHoverProvider(state)),
+    vscode8.languages.registerCodeLensProvider(docSelector, new TypeMeterCodeLensProvider(state)),
+    vscode8.languages.registerHoverProvider(docSelector, new TypeMeterHoverProvider(state)),
     registerCommands(context),
     registerWatch()
   );
@@ -435,9 +775,9 @@ function registerCommands(context) {
     const target = await pickTsconfig();
     if (!target) return false;
     try {
-      const summary = await vscode7.window.withProgress(
+      const summary = await vscode8.window.withProgress(
         {
-          location: vscode7.ProgressLocation.Notification,
+          location: vscode8.ProgressLocation.Notification,
           title: "TypeMeter: measuring declarations",
           cancellable: true
         },
@@ -460,7 +800,7 @@ function registerCommands(context) {
       statusItem.text = `$(graph) ${summary.declCount} decls \xB7 ${summary.totalMs.toFixed(0)} ms`;
       statusItem.tooltip = `TypeMeter: ${summary.declCount} declarations \xB7 total first-touch ${summary.totalMs.toFixed(1)} ms \xB7 TS ${summary.typescriptVersion} (${summary.typescriptSource})`;
       if (!silent) {
-        const open = await vscode7.window.showInformationMessage(
+        const open = await vscode8.window.showInformationMessage(
           `TypeMeter: measured ${summary.declCount} declarations in ${summary.totalMs.toFixed(1)} ms.`,
           "Show slowest types"
         );
@@ -471,7 +811,7 @@ function registerCommands(context) {
       return true;
     } catch (e) {
       if (!silent) {
-        vscode7.window.showErrorMessage(`TypeMeter: ${e instanceof Error ? e.message : String(e)}`);
+        vscode8.window.showErrorMessage(`TypeMeter: ${e instanceof Error ? e.message : String(e)}`);
       }
       return false;
     }
@@ -479,20 +819,49 @@ function registerCommands(context) {
   const showDetailFor = (fileStr, line) => {
     let fsPath = fileStr;
     try {
-      fsPath = vscode7.Uri.parse(fileStr).fsPath;
+      fsPath = vscode8.Uri.parse(fileStr).fsPath;
     } catch {
     }
     const r = state.nearest(fsPath, line);
     if (!r) {
-      vscode7.window.showWarningMessage('TypeMeter: no measurement for this file \u2014 run "Measure Project Types".');
+      vscode8.window.showWarningMessage('TypeMeter: no measurement for this file \u2014 run "Measure Project Types".');
       return;
     }
     openDetail(r);
   };
-  return vscode7.Disposable.from(
-    vscode7.commands.registerCommand("typemeter.measureProject", () => measure(false)),
-    vscode7.commands.registerCommand("typemeter.measureAtCursor", async () => {
-      const editor = vscode7.window.activeTextEditor;
+  const runXCheck = async () => {
+    const target = await pickTsconfig();
+    if (!target) return;
+    try {
+      const summary = await vscode8.window.withProgress(
+        {
+          location: vscode8.ProgressLocation.Notification,
+          title: "TypeMeter: measuring declarations",
+          cancellable: true
+        },
+        (progress, token) => runMeasurement(context.extensionPath, { ...target, token })
+      );
+      state.set(summary);
+      await vscode8.window.withProgress(
+        { location: vscode8.ProgressLocation.Notification, title: "TypeMeter: running tsc cross-check" },
+        () => runCrossCheck(target.projectDir, target.tsconfig, summary).then((r) => {
+          lastCrossCheck = r;
+        })
+      );
+      openCrossCheckView({ get summary() {
+        return state.summary;
+      } }, { get report() {
+        return lastCrossCheck;
+      } });
+    } catch (e) {
+      vscode8.window.showErrorMessage(`TypeMeter: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  return vscode8.Disposable.from(
+    vscode8.commands.registerCommand("typemeter.measureProject", () => measure(false)),
+    vscode8.commands.registerCommand("typemeter.crossCheck", () => runXCheck()),
+    vscode8.commands.registerCommand("typemeter.measureAtCursor", async () => {
+      const editor = vscode8.window.activeTextEditor;
       if (!editor) return;
       if (!state.hasFile(editor.document.uri.fsPath)) {
         const ok = await measure(false);
@@ -500,26 +869,26 @@ function registerCommands(context) {
       }
       const r = state.nearest(editor.document.uri.fsPath, editor.selection.active.line);
       if (!r) {
-        vscode7.window.showInformationMessage("TypeMeter: no declaration measured near the cursor.");
+        vscode8.window.showInformationMessage("TypeMeter: no declaration measured near the cursor.");
         return;
       }
       openDetail(r);
     }),
-    vscode7.commands.registerCommand("typemeter.showLeaderboard", () => openLeaderboard({ get summary() {
+    vscode8.commands.registerCommand("typemeter.showLeaderboard", () => openLeaderboard({ get summary() {
       return state.summary;
     } })),
-    vscode7.commands.registerCommand("typemeter.showDetail", (fileStr, line) => showDetailFor(fileStr, line))
+    vscode8.commands.registerCommand("typemeter.showDetail", (fileStr, line) => showDetailFor(fileStr, line))
   );
 }
 function registerWatch() {
   let timer;
-  return vscode7.workspace.onDidSaveTextDocument((doc) => {
+  return vscode8.workspace.onDidSaveTextDocument((doc) => {
     if (doc.languageId !== "typescript" && doc.languageId !== "typescriptreact") return;
-    const enabled = vscode7.workspace.getConfiguration("typemeter").get("watchOnSave", false);
+    const enabled = vscode8.workspace.getConfiguration("typemeter").get("watchOnSave", false);
     if (!enabled) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
-      void vscode7.commands.executeCommand("typemeter.measureProject");
+      void vscode8.commands.executeCommand("typemeter.measureProject");
     }, 2e3);
   });
 }

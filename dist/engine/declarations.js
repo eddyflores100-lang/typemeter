@@ -1,15 +1,10 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.collectDeclarations = collectDeclarations;
-/** Collect measurable declarations from a source file, top-down. */
-const typescript_1 = __importDefault(require("typescript"));
-function collectDeclarations(sourceFile, checker) {
+function collectDeclarations(sourceFile, checker, T) {
     const out = [];
     const push = (node, nameNode, kind) => {
-        const name = nameNode && typescript_1.default.isIdentifier(nameNode)
+        const name = nameNode && T.isIdentifier(nameNode)
             ? nameNode.text
             : syntheticName(node, checker);
         out.push({
@@ -24,41 +19,41 @@ function collectDeclarations(sourceFile, checker) {
     };
     const visit = (node) => {
         const parent = node.parent;
-        if (typescript_1.default.isTypeAliasDeclaration(node))
+        if (T.isTypeAliasDeclaration(node))
             push(node, node.name, 'type-alias');
-        else if (typescript_1.default.isInterfaceDeclaration(node))
+        else if (T.isInterfaceDeclaration(node))
             push(node, node.name, 'interface');
-        else if (typescript_1.default.isClassDeclaration(node))
+        else if (T.isClassDeclaration(node))
             push(node, node.name, 'class');
-        else if (typescript_1.default.isEnumDeclaration(node))
+        else if (T.isEnumDeclaration(node))
             push(node, node.name, 'enum');
-        else if (typescript_1.default.isFunctionDeclaration(node) && node.name)
+        else if (T.isFunctionDeclaration(node) && node.name)
             push(node, node.name, 'function');
-        else if ((typescript_1.default.isMethodDeclaration(node) || typescript_1.default.isMethodSignature(node)) &&
+        else if ((T.isMethodDeclaration(node) || T.isMethodSignature(node)) &&
             node.name &&
-            typescript_1.default.isIdentifier(node.name) &&
+            T.isIdentifier(node.name) &&
             parent &&
-            (typescript_1.default.isInterfaceDeclaration(parent) || typescript_1.default.isClassDeclaration(parent) || typescript_1.default.isClassExpression(parent)))
+            (T.isInterfaceDeclaration(parent) || T.isClassDeclaration(parent) || T.isClassExpression(parent)))
             push(node, node.name, 'method');
-        else if ((typescript_1.default.isPropertyDeclaration(node) || typescript_1.default.isPropertySignature(node)) &&
+        else if ((T.isPropertyDeclaration(node) || T.isPropertySignature(node)) &&
             node.name &&
-            typescript_1.default.isIdentifier(node.name) &&
+            T.isIdentifier(node.name) &&
             parent &&
-            (typescript_1.default.isInterfaceDeclaration(parent) || typescript_1.default.isClassDeclaration(parent) || typescript_1.default.isClassExpression(parent)))
+            (T.isInterfaceDeclaration(parent) || T.isClassDeclaration(parent) || T.isClassExpression(parent)))
             push(node, node.name, 'property');
-        else if (typescript_1.default.isVariableStatement(node)) {
+        else if (T.isVariableStatement(node)) {
             const first = node.declarationList.declarations[0];
             if (first && first.type)
                 push(node, first.name, 'variable');
         }
         else {
-            typescript_1.default.forEachChild(node, visit);
+            T.forEachChild(node, visit);
             return;
         }
         // still descend into declarations with bodies/members (nested classes, vars in fns)
-        typescript_1.default.forEachChild(node, visit);
+        T.forEachChild(node, visit);
     };
-    typescript_1.default.forEachChild(sourceFile, visit);
+    T.forEachChild(sourceFile, visit);
     return out;
 }
 function syntheticName(node, _checker) {

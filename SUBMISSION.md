@@ -68,3 +68,34 @@ The headless test suite asserts: metric shape, union/depth detection, grade sani
 - ✅ MIT licensed, open sourced
 - ✅ Installable VSIX release
 - ✅ Documented methodology
+
+## v0.2.0 — self-validation against the compiler itself + two real-project results
+
+**Cross-check mode** (`node dist/cli.js <project> --crosscheck`, or the `TypeMeter: Cross-check vs tsc (--generateTrace)` command): runs the project's own `tsc --noEmit --extendedDiagnostics --generateTrace` and reports where TypeMeter's numbers agree with the compiler's own instrumentation:
+
+- **Counter identity** — the sweep's cumulative `getInstantiationCount()` / `getTypeCount()` (the same instrumentation `--extendedDiagnostics` prints) vs tsc's whole-program totals, as a coverage share.
+- **Cold-start totals** — tsc's per-file `checkSourceFile` durations (from `trace.json`) summed over project files, vs TypeMeter's first-touch + program construction.
+- **OOM survival** — when tsc's full check exhausts memory, the partial trace is parsed (streamed, truncation-tolerant) and the kill is reported honestly; the TypeMeter sweep completed.
+- The per-file histogram is printed with an explicit caveat: marginal first-touch redistributes shared costs, so per-file histograms are expected to differ — the totals and the counters are the anchors.
+
+**type-fest (TS 5.9.3, 440 files, 2,838 declarations):** the sweep surfaced a type-level explosion that `tsc` cannot even finish checking on this machine —
+
+```
+ 11,323 ms 2,555,221 inst 1,513,367 typ  E  WideTest   test-d/int-range.ts:21
+  1,561 ms   516,729 inst   506,549 typ  E  Int0_998   test-d/int-closed-range.ts:17
+```
+
+The full `tsc --noEmit` check of the same tree dies with *JavaScript heap out of memory* and is killed by the OOM killer; TypeMeter's declaration sweep completed in ~21 s and names the exact declaration responsible for the 11-second explosion.
+
+**tsperf/tracer itself (TS 5.4.5, pnpm monorepo):** 203 declarations measured; cross-check on a *different compiler version* than TypeMeter's own dev dependency —
+
+```
+  TypeMeter sweep 60,168 inst · 18,983 types
+  full tsc run   100,887 inst · 25,872 types (sweep triggers 59.6% / 73.4% of it)
+  cold-start on project files: tsc check 1,098 ms vs TypeMeter first-touch 753 ms + program 1,132 ms
+  most expensive interface: Message (src/messages.ts) — 37.6 ms · 8,496 inst · 2,176 typ · grade E
+```
+
+**Correctness fix this uncovered:** `SyntaxKind` enum values shift between TypeScript versions (+1 between 5.4 and 5.5). A program built with one version's compiler, walked with another version's predicates, silently matches *nothing* — a TS 5.4 project measured with mismatched instances returns **0 declarations**. All AST predicates and TypeFlags reads now run through the project's resolved TypeScript module, so version accuracy holds end-to-end (this is exactly the class of bug the tracer itself exists to hunt).
+
+The headless test suite additionally asserts the cross-check report shape.

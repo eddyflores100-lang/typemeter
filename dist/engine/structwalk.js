@@ -1,11 +1,6 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.walkType = walkType;
-/** Bounded structural walk of a resolved type: complexity metrics + referenced declarations. */
-const typescript_1 = __importDefault(require("typescript"));
 const MAX_NODES = 4000;
 const MAX_DEPTH = 4;
 const MAX_UNION = 32;
@@ -24,25 +19,17 @@ const GLOBAL_NOISE = new Set([
     'Parameters', 'Awaited', 'ConstructorParameters', 'Uppercase', 'Lowercase',
     'Capitalize', 'Uncapitalize', 'ReadonlyMap', 'ReadonlySet',
 ]);
-/** primitives & literals — expanding their apparent members would be noise */
-const PRIMITIVE_FLAGS = typescript_1.default.TypeFlags.Any |
-    typescript_1.default.TypeFlags.Unknown |
-    typescript_1.default.TypeFlags.String |
-    typescript_1.default.TypeFlags.Number |
-    typescript_1.default.TypeFlags.Boolean |
-    typescript_1.default.TypeFlags.BigInt |
-    typescript_1.default.TypeFlags.ESSymbol |
-    typescript_1.default.TypeFlags.Void |
-    typescript_1.default.TypeFlags.Undefined |
-    typescript_1.default.TypeFlags.Null |
-    typescript_1.default.TypeFlags.Never |
-    typescript_1.default.TypeFlags.Enum |
-    typescript_1.default.TypeFlags.EnumLiteral |
-    typescript_1.default.TypeFlags.StringLiteral |
-    typescript_1.default.TypeFlags.NumberLiteral |
-    typescript_1.default.TypeFlags.BooleanLiteral |
-    typescript_1.default.TypeFlags.UniqueESSymbol;
-function walkType(entry, checker) {
+/** primitives & literals — expanding their apparent members would be noise.
+ * Computed per-call from the RESOLVED module `T` so flags stay version-accurate. */
+function primitiveFlags(T) {
+    const F = T.TypeFlags;
+    return (F.Any | F.Unknown | F.String | F.Number | F.Boolean | F.BigInt |
+        F.ESSymbol | F.Void | F.Undefined | F.Null | F.Never | F.Enum |
+        F.EnumLiteral | F.StringLiteral | F.NumberLiteral | F.BooleanLiteral |
+        F.UniqueESSymbol);
+}
+function walkType(entry, checker, T) {
+    const PRIMITIVE = primitiveFlags(T);
     const res = {
         properties: 0,
         unionMembers: 0,
@@ -72,7 +59,7 @@ function walkType(entry, checker) {
         res.nodes++;
         res.depth = Math.max(res.depth, depth);
         countRef(type);
-        if (type.flags & PRIMITIVE_FLAGS)
+        if (type.flags & PRIMITIVE)
             return;
         // stdlib globals: count the reference, do not expand their members
         const ownName = type.symbol ? type.symbol.getName() : undefined;

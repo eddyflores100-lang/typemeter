@@ -37,26 +37,32 @@ Object.defineProperty(exports, "__esModule", { value: true });
 /**
  * TypeMeter headless CLI — CI-friendly type cost report.
  *
- *   node dist/cli.js <projectDir> [--tsconfig path] [--json] [--top N]
+ *   node dist/cli.js <projectDir> [--tsconfig path] [--json] [--top N] [--crosscheck]
  *
  * Measures every declaration's first-touch cost (compiler-level) in a fresh
  * worker process and prints a ranked report (or machine-readable JSON).
+ * `--crosscheck` additionally runs the project's own tsc
+ * (--extendedDiagnostics --generateTrace) and validates TypeMeter's counters
+ * and cold-start totals against the compiler's own instrumentation.
  */
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
+const xcheck_1 = require("./engine/xcheck");
 function parseArgs(argv) {
-    const opts = { projectDir: process.cwd(), json: false, top: 25 };
+    const opts = { projectDir: process.cwd(), json: false, top: 25, crosscheck: false };
     const rest = [];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--json')
             opts.json = true;
+        else if (a === '--crosscheck')
+            opts.crosscheck = true;
         else if (a === '--tsconfig')
             opts.tsconfig = path.resolve(argv[++i]);
         else if (a === '--top')
             opts.top = parseInt(argv[++i], 10) || 25;
         else if (a === '--help' || a === '-h') {
-            console.log('usage: typemeter <projectDir> [--tsconfig path] [--json] [--top N]');
+            console.log('usage: typemeter <projectDir> [--tsconfig path] [--json] [--top N] [--crosscheck]');
             process.exit(0);
         }
         else
@@ -123,12 +129,39 @@ function fmtRow(r) {
     const ms = r.firstTouchMs >= 100 ? r.firstTouchMs.toFixed(0) : r.firstTouchMs.toFixed(2);
     return `${String(ms).padStart(9)} ms ${String(r.instantiations).padStart(7)} inst ${String(r.typesCreated).padStart(7)} typ ${r.complexity.grade}  ${r.name.slice(0, 34).padEnd(34)} ${rel}:${r.line + 1}`;
 }
+function fmtCrossCheck(cc) {
+    const L = [];
+    const cov = (v) => v === null ? 'n/a' : `${(v * 100).toFixed(1)}%`;
+    L.push('Cross-check vs tsc (--extendedDiagnostics --generateTrace)');
+    L.push(`  tsc ${cc.tsc.version ?? '(version n/a)'} · exit ${cc.tsc.exitCode ?? 'null'}${cc.tsc.oom ? ' · OOM KILLED (reported honestly, partial trace parsed)' : ''}`);
+    L.push(`  counters: sweep ${cc.counters.sweepInstantiations.toLocaleString()} inst / ${cc.counters.sweepTypes.toLocaleString()} types`);
+    L.push(`           tsc   ${(cc.counters.tscInstantiations ?? 0).toLocaleString()} inst / ${(cc.counters.tscTypes ?? 0).toLocaleString()} types`);
+    L.push(`  coverage: instantiations ${cov(cc.counters.instantiationCoverage)} · types ${cov(cc.counters.typeCoverage)}`);
+    L.push(`  cold-start: tsc check ${cc.coldStart.tscCheckMs === null ? 'n/a' : cc.coldStart.tscCheckMs.toFixed(0) + ' ms'} vs first-touch ${cc.coldStart.sweepFirstTouchMs.toFixed(0)} ms + program ${cc.coldStart.programMs.toFixed(0)} ms`);
+    if (cc.perFile.pearson !== null) {
+        L.push(`  per-file Pearson r (tsc ms vs sweep ms): ${cc.perFile.pearson}`);
+    }
+    if (cc.perFile.histogram.length) {
+        L.push('  per-file histogram (top):');
+        for (const h of cc.perFile.histogram.slice(0, 5)) {
+            L.push(`    ${String(h.tscMs.toFixed(1)).padStart(9)} ms tsc · ${String(h.sweepMs.toFixed(1)).padStart(8)} ms sweep · ${h.decls} decls · ${h.file}`);
+        }
+        L.push(`    (caveat: ${cc.perFile.caveat})`);
+    }
+    for (const n of cc.notes)
+        L.push(`  note: ${n}`);
+    return L;
+}
 async function main() {
     const opts = parseArgs(process.argv.slice(2));
     try {
         const summary = await runWorker(opts);
         if (!opts.json)
             process.stderr.write('\n');
+        if (opts.crosscheck) {
+            const cc = await (0, xcheck_1.runCrossCheck)(opts.projectDir, opts.tsconfig, summary);
+            summary.crossCheck = cc;
+        }
         if (opts.json) {
             console.log(JSON.stringify(summary, null, 2));
         }
@@ -140,6 +173,12 @@ async function main() {
             console.log(`${'ms'.padStart(11)} ${'inst'.padStart(12)} ${'types'.padStart(11)}  grade  name`);
             for (const r of summary.results.slice(0, opts.top))
                 console.log(fmtRow(r));
+            const cc = summary.crossCheck;
+            if (cc) {
+                console.log('');
+                for (const line of fmtCrossCheck(cc))
+                    console.log(line);
+            }
         }
     }
     catch (e) {

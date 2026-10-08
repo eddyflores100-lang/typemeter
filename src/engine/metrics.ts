@@ -68,7 +68,13 @@ export interface RunSummary {
   /** total first-touch ms across all declarations */
   totalMs: number;
   programMs: number;
+  /** cumulative checker instantiation counter AFTER the whole sweep (cross-check anchor) */
+  finalInstantiations: number;
+  /** cumulative checker type-creation counter AFTER the whole sweep (cross-check anchor) */
+  finalTypes: number;
   results: DeclResult[];
+  /** present when the run included a tsc cross-check (CLI --crosscheck / extension command) */
+  crossCheck?: unknown;
 }
 
 export interface ProgressLine {

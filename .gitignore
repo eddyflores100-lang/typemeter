@@ -1,4 +1,2 @@
 node_modules/
-dist/vendor
-test/fixtures/project/*.js
-*.vsix
+*.tsbuildinfo

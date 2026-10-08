@@ -1,8 +1,8 @@
 {
   "name": "typemeter",
   "displayName": "TypeMeter — TS type load-time & complexity",
-  "description": "Compiler-level measurement of TypeScript type load-time, complexity and cost attribution — measured inside the checker, not guessed from strings.",
-  "version": "0.1.0",
+  "description": "Compiler-level measurement of TypeScript type load-time, complexity and cost attribution — measured inside the checker, not guessed from strings. Cross-checks itself against tsc --extendedDiagnostics.",
+  "version": "0.2.0",
   "publisher": "eddyflores100-lang",
   "license": "MIT",
   "repository": {
@@ -22,11 +22,14 @@
     "performance",
     "type complexity",
     "tsserver",
-    "tsperf"
+    "tsperf",
+    "extendedDiagnostics",
+    "generateTrace"
   ],
   "activationEvents": [
     "onCommand:typemeter.measureProject",
     "onCommand:typemeter.measureAtCursor",
+    "onCommand:typemeter.crossCheck",
     "onCommand:typemeter.showLeaderboard",
     "onCommand:typemeter.showDetail",
     "onLanguage:typescript",
@@ -46,6 +49,11 @@
       {
         "command": "typemeter.measureAtCursor",
         "title": "TypeMeter: Measure Type at Cursor (isolated)",
+        "category": "TypeMeter"
+      },
+      {
+        "command": "typemeter.crossCheck",
+        "title": "TypeMeter: Cross-check vs tsc (--generateTrace)",
         "category": "TypeMeter"
       },
       {

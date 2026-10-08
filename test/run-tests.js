@@ -66,7 +66,38 @@ execFile(process.execPath, [CLI, FIXTURE, '--json'], { maxBuffer: 64 * 1024 * 10
     for (const r of summary.results.slice(0, 3)) {
       console.log(`      ${r.firstTouchMs.toFixed(2)} ms · ${r.instantiations} inst · ${r.name}`);
     }
-    process.exit(0);
+
+    // ---- phase 2: cross-check report shape (separate CLI run) ----
+    execFile(
+      process.execPath,
+      [CLI, FIXTURE, '--json', '--crosscheck'],
+      { maxBuffer: 64 * 1024 * 1024 },
+      (err2, stdout2, stderr2) => {
+        try {
+          assert.ok(!err2, `CLI --crosscheck exited with error: ${stderr2.slice(0, 400)}`);
+          const s2 = JSON.parse(stdout2);
+          // sweep counters must now be present (cross-check anchors)
+          assert.ok(Number.isInteger(s2.finalInstantiations) && s2.finalInstantiations >= 0, 'finalInstantiations missing');
+          assert.ok(Number.isInteger(s2.finalTypes) && s2.finalTypes >= 0, 'finalTypes missing');
+          const cc = s2.crossCheck;
+          assert.ok(cc && typeof cc === 'object', 'crossCheck section missing from --crosscheck run');
+          assert.ok(cc.tsc && typeof cc.tsc.exitCode !== 'undefined', 'crossCheck.tsc.exitCode missing');
+          assert.ok(typeof cc.tsc.oom === 'boolean', 'crossCheck.tsc.oom must be boolean');
+          assert.ok(cc.counters, 'crossCheck.counters missing');
+          assert.ok(Number.isInteger(cc.counters.sweepInstantiations), 'counters.sweepInstantiations missing');
+          assert.ok(cc.coldStart && typeof cc.coldStart.sweepFirstTouchMs === 'number', 'coldStart missing');
+          assert.ok(Array.isArray(cc.perFile.histogram), 'perFile.histogram must be an array');
+          assert.ok(cc.perFile.caveat && cc.perFile.caveat.length > 40, 'per-file caveat must be present (honesty requirement)');
+          assert.ok(Array.isArray(cc.notes), 'notes must be an array');
+          console.log(`OK — crosscheck report shape valid (tsc exit ${cc.tsc.exitCode}, pearson ${cc.perFile.pearson ?? 'n/a'})`);
+          process.exit(0);
+        } catch (e) {
+          console.error('TEST FAILED (phase 2):', e.message);
+          if (stderr2) console.error('stderr:', stderr2.slice(0, 800));
+          process.exit(1);
+        }
+      }
+    );
   } catch (e) {
     console.error('TEST FAILED:', e.message);
     if (stderr) console.error('stderr:', stderr.slice(0, 800));

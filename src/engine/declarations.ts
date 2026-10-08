@@ -1,4 +1,11 @@
-/** Collect measurable declarations from a source file, top-down. */
+/** Collect measurable declarations from a source file, top-down.
+ *
+ * IMPORTANT: `T` must be the SAME TypeScript module instance the program was
+ * built with. `SyntaxKind` numeric values shift between TS releases (+1 from
+ * 5.4 to 5.5); AST predicates from a different instance silently match nothing
+ * on older/newer trees (the exact class of bug a type-perf tracer exists to
+ * hunt). The static `ts` import is used for TYPES only, never for predicates.
+ */
 import ts from 'typescript';
 import { DeclKind } from './metrics';
 
@@ -11,15 +18,18 @@ export interface CollectedDecl {
   col: number;
 }
 
+type TS = typeof ts;
+
 export function collectDeclarations(
   sourceFile: ts.SourceFile,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
+  T: TS
 ): CollectedDecl[] {
   const out: CollectedDecl[] = [];
   const push = (node: ts.Node, nameNode: ts.Node | undefined, kind: DeclKind) => {
     const name =
-      nameNode && ts.isIdentifier(nameNode)
-        ? nameNode.text
+      nameNode && T.isIdentifier(nameNode)
+        ? (nameNode as ts.Identifier).text
         : syntheticName(node, checker);
     out.push({
       node,
@@ -37,38 +47,38 @@ export function collectDeclarations(
 
   const visit = (node: ts.Node): void => {
     const parent = node.parent;
-    if (ts.isTypeAliasDeclaration(node)) push(node, node.name, 'type-alias');
-    else if (ts.isInterfaceDeclaration(node)) push(node, node.name, 'interface');
-    else if (ts.isClassDeclaration(node)) push(node, node.name, 'class');
-    else if (ts.isEnumDeclaration(node)) push(node, node.name, 'enum');
-    else if (ts.isFunctionDeclaration(node) && node.name) push(node, node.name, 'function');
+    if (T.isTypeAliasDeclaration(node)) push(node, node.name, 'type-alias');
+    else if (T.isInterfaceDeclaration(node)) push(node, node.name, 'interface');
+    else if (T.isClassDeclaration(node)) push(node, node.name, 'class');
+    else if (T.isEnumDeclaration(node)) push(node, node.name, 'enum');
+    else if (T.isFunctionDeclaration(node) && node.name) push(node, node.name, 'function');
     else if (
-      (ts.isMethodDeclaration(node) || ts.isMethodSignature(node)) &&
+      (T.isMethodDeclaration(node) || T.isMethodSignature(node)) &&
       node.name &&
-      ts.isIdentifier(node.name) &&
+      T.isIdentifier(node.name) &&
       parent &&
-      (ts.isInterfaceDeclaration(parent) || ts.isClassDeclaration(parent) || ts.isClassExpression(parent))
+      (T.isInterfaceDeclaration(parent) || T.isClassDeclaration(parent) || T.isClassExpression(parent))
     )
       push(node, node.name, 'method');
     else if (
-      (ts.isPropertyDeclaration(node) || ts.isPropertySignature(node)) &&
+      (T.isPropertyDeclaration(node) || T.isPropertySignature(node)) &&
       node.name &&
-      ts.isIdentifier(node.name) &&
+      T.isIdentifier(node.name) &&
       parent &&
-      (ts.isInterfaceDeclaration(parent) || ts.isClassDeclaration(parent) || ts.isClassExpression(parent))
+      (T.isInterfaceDeclaration(parent) || T.isClassDeclaration(parent) || T.isClassExpression(parent))
     )
       push(node, node.name, 'property');
-    else if (ts.isVariableStatement(node)) {
+    else if (T.isVariableStatement(node)) {
       const first = node.declarationList.declarations[0];
       if (first && first.type) push(node, first.name, 'variable');
     } else {
-      ts.forEachChild(node, visit);
+      T.forEachChild(node, visit);
       return;
     }
     // still descend into declarations with bodies/members (nested classes, vars in fns)
-    ts.forEachChild(node, visit);
+    T.forEachChild(node, visit);
   };
-  ts.forEachChild(sourceFile, visit);
+  T.forEachChild(sourceFile, visit);
   return out;
 }
 

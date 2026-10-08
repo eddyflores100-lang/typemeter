@@ -1,5 +1,12 @@
-/** Bounded structural walk of a resolved type: complexity metrics + referenced declarations. */
+/** Bounded structural walk of a resolved type: complexity metrics + referenced declarations.
+ *
+ * `T` must be the same TypeScript instance the checker comes from: TypeFlags
+ * numeric values are version-specific (they gain members across releases), so
+ * a static import's mask can silently mis-classify another version's types.
+ */
 import ts from 'typescript';
+
+type TS = typeof ts;
 
 export interface WalkResult {
   properties: number;
@@ -31,30 +38,24 @@ const GLOBAL_NOISE = new Set([
   'Capitalize', 'Uncapitalize', 'ReadonlyMap', 'ReadonlySet',
 ]);
 
-/** primitives & literals — expanding their apparent members would be noise */
-const PRIMITIVE_FLAGS =
-  ts.TypeFlags.Any |
-  ts.TypeFlags.Unknown |
-  ts.TypeFlags.String |
-  ts.TypeFlags.Number |
-  ts.TypeFlags.Boolean |
-  ts.TypeFlags.BigInt |
-  ts.TypeFlags.ESSymbol |
-  ts.TypeFlags.Void |
-  ts.TypeFlags.Undefined |
-  ts.TypeFlags.Null |
-  ts.TypeFlags.Never |
-  ts.TypeFlags.Enum |
-  ts.TypeFlags.EnumLiteral |
-  ts.TypeFlags.StringLiteral |
-  ts.TypeFlags.NumberLiteral |
-  ts.TypeFlags.BooleanLiteral |
-  ts.TypeFlags.UniqueESSymbol;
+/** primitives & literals — expanding their apparent members would be noise.
+ * Computed per-call from the RESOLVED module `T` so flags stay version-accurate. */
+function primitiveFlags(T: TS): number {
+  const F = T.TypeFlags;
+  return (
+    F.Any | F.Unknown | F.String | F.Number | F.Boolean | F.BigInt |
+    F.ESSymbol | F.Void | F.Undefined | F.Null | F.Never | F.Enum |
+    F.EnumLiteral | F.StringLiteral | F.NumberLiteral | F.BooleanLiteral |
+    F.UniqueESSymbol
+  );
+}
 
 export function walkType(
   entry: ts.Type | undefined,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
+  T: TS
 ): WalkResult {
+  const PRIMITIVE = primitiveFlags(T);
   const res: WalkResult = {
     properties: 0,
     unionMembers: 0,
@@ -82,7 +83,7 @@ export function walkType(
     res.depth = Math.max(res.depth, depth);
     countRef(type);
 
-    if (type.flags & PRIMITIVE_FLAGS) return;
+    if ((type.flags as number) & PRIMITIVE) return;
 
     // stdlib globals: count the reference, do not expand their members
     const ownName = type.symbol ? type.symbol.getName() : undefined;

@@ -19,23 +19,31 @@ import { DeclResult, RefCost, RunSummary, gradeOf } from './metrics';
 
 const require2 = createRequire(__filename);
 
-interface ResolvedTS {
-  module: typeof ts;
-  source: 'project' | 'bundled' | 'vendored';
-  version: string;
-}
+/** TS module type re-export for injected modules (version-matched predicates). */
+export type TSModule = typeof ts;
 
-function resolveTypeScript(projectDir: string): ResolvedTS {
-  const candidates: Array<{ p: string; source: ResolvedTS['source'] }> = [
+export function resolveTypeScript(projectDir: string): { module: TSModule; source: 'project' | 'bundled' | 'vendored'; version: string; binPath: string } {
+  const candidates: Array<{ p: string; source: 'project' | 'bundled' | 'vendored' }> = [
     { p: path.join(projectDir, 'node_modules', 'typescript'), source: 'project' },
     { p: path.join(__dirname, '..', '..', 'node_modules', 'typescript'), source: 'bundled' },
-    { p: path.join(__dirname, '..', 'vendor', 'typescript', 'lib', 'typescript.js'), source: 'vendored' },
+    // vendor/ sits at the PACKAGE root (repo root / VSIX root) — from
+    // dist/engine that is '../..'; a '..'-only path silently resolves to
+    // dist/vendor/ which exists nowhere (found while validating fresh-clone
+    // runs without node_modules).
+    { p: path.join(__dirname, '..', '..', 'vendor', 'typescript', 'lib', 'typescript.js'), source: 'vendored' },
   ];
   for (const c of candidates) {
     try {
       const mod = require2(c.p) as typeof ts;
       if (mod && typeof mod.createLanguageService === 'function') {
-        return { module: mod, source: c.source, version: mod.version };
+        // location of the tsc CLI sibling of the resolved lib
+        let binPath: string;
+        try {
+          binPath = require2.resolve('typescript/bin/tsc', { paths: [path.dirname(require2.resolve(c.p))] });
+        } catch {
+          binPath = path.join(c.p, 'bin', 'tsc');
+        }
+        return { module: mod, source: c.source, version: mod.version, binPath };
       }
     } catch {
       /* try next candidate */
@@ -43,6 +51,8 @@ function resolveTypeScript(projectDir: string): ResolvedTS {
   }
   throw new Error('TypeScript module not found (project, bundled or vendored)');
 }
+
+export { resolveTypeScript as resolveTypeScriptModule };
 
 function parseArgs(argv: string[]): { projectDir: string; tsconfig?: string } {
   const out = { projectDir: process.cwd(), tsconfig: undefined as string | undefined };
@@ -125,7 +135,7 @@ function main(): void {
     for (const file of projectFiles) {
       const sf = program.getSourceFile(file);
       if (!sf) continue;
-      const decls = collectDeclarations(sf as unknown as import('typescript').SourceFile, checker as unknown as import('typescript').TypeChecker);
+      const decls = collectDeclarations(sf as unknown as import('typescript').SourceFile, checker as unknown as import('typescript').TypeChecker, T as unknown as typeof ts);
 
       for (const d of decls) {
         const target = d.nameNode ?? d.node;
@@ -140,7 +150,7 @@ function main(): void {
         }
         let w: ReturnType<typeof walkType> | null = null;
         try {
-          w = type ? walkType(type, checker as unknown as import('typescript').TypeChecker) : null;
+          w = type ? walkType(type, checker as unknown as import('typescript').TypeChecker, T as unknown as typeof ts) : null;
         } catch {
           w = null;
         }
@@ -189,7 +199,7 @@ function main(): void {
         };
         results.push(pushed);
         if (w) walkRefsPerDecl.set(pushed, w.refs);
-        astRefsPerDecl.set(pushed, collectTypeRefs(d.node as unknown as import('typescript').Node));
+        astRefsPerDecl.set(pushed, collectTypeRefs(d.node as unknown as import('typescript').Node, T as unknown as typeof ts));
       }
       done++;
       emit({ type: 'progress', done, total: projectFiles.length, file: path.basename(file) });
@@ -218,6 +228,10 @@ function main(): void {
       r.attribution = matched.slice(0, 5);
     }
 
+    // cumulative compiler counters after the sweep — the cross-check anchors
+    const finalInstantiations = readInstantiations(checker as unknown as import('typescript').TypeChecker);
+    const finalTypes = readTypeCount(checker as unknown as import('typescript').TypeChecker);
+
     const summary: RunSummary = {
       projectDir,
       tsconfig: cfgPath,
@@ -227,6 +241,8 @@ function main(): void {
       declCount: results.length,
       totalMs: Math.round(results.reduce((s, r) => s + r.firstTouchMs, 0) * 1000) / 1000,
       programMs: Math.round(programMs * 1000) / 1000,
+      finalInstantiations,
+      finalTypes,
       results: results.sort((a, b) => b.firstTouchMs - a.firstTouchMs),
     };
     emit({ type: 'summary', summary });

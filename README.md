@@ -18,18 +18,19 @@ All timing and counting comes from the TypeScript compiler API itself. There is 
 | --- | --- |
 | `TypeMeter: Measure Project Types` | fresh-process sweep of every type alias, interface, class, enum, function, method, property and typed variable |
 | `TypeMeter: Measure Type at Cursor (isolated)` | re-measures fresh and reports the declaration nearest your cursor |
+| `TypeMeter: Cross-check vs tsc (--generateTrace)` | runs the project's own `tsc --noEmit --extendedDiagnostics --generateTrace` and compares TypeMeter's counters and cold-start totals against the compiler's own instrumentation |
 | `TypeMeter: Show Slowest Types` | leaderboard webview — ranked by first-touch ms, click to jump |
 | `TypeMeter: Show Declaration Detail` | full metrics panel + cost attribution table + copy-as-JSON |
 | **CodeLens** | `⚡ 5.8 ms · 11 inst · D` above every measured declaration (toggleable) |
 | **Hover** | cost summary + top attribution on any measured declaration |
 | **Watch on save** | optional debounced re-measure (off by default) |
-| **Headless CLI** | `node dist/cli.js <project> [--json] [--top N]` — CI-friendly, same engine |
+| **Headless CLI** | `node dist/cli.js <project> [--json] [--top N] [--crosscheck]` — CI-friendly, same engine |
 
 ## Install
 
 ```bash
 # from the release VSIX
-code --install-extension typemeter-0.1.0.vsix
+code --install-extension typemeter-0.2.0.vsix
 
 # or from source
 git clone https://github.com/eddyflores100-lang/typemeter
@@ -54,6 +55,40 @@ node dist/cli.js path/to/project --top 20
 ```
 
 Exit code 0 on success; `--json` emits the full `RunSummary` (machine-readable, stable shape).
+
+## Cross-check against tsc (v0.2.0)
+
+TypeMeter validates **itself** against the compiler's own instrumentation. The cross-check mode (`--crosscheck` CLI flag or the `TypeMeter: Cross-check vs tsc (--generateTrace)` command) runs the project's own `tsc --noEmit --extendedDiagnostics --generateTrace` and compares:
+
+- **Counter identity** — the sweep's cumulative `getInstantiationCount()` / `getTypeCount()` (the same instrumentation `--extendedDiagnostics` prints) vs tsc's whole-program totals, as a coverage share.
+- **Cold-start totals** — tsc's per-file `checkSourceFile` durations (from `trace.json`) summed over project files, vs TypeMeter's first-touch + program construction.
+- **OOM survival** — when tsc's full check exhausts memory, the partial trace is parsed (streamed, truncation-tolerant) and the kill is reported honestly; the TypeMeter sweep completed.
+
+Per-file histograms come with an explicit caveat: marginal first-touch redistributes shared costs, so per-file numbers are expected to differ — **the totals and the compiler counters are the anchors**.
+
+### Real-project results
+
+**tsperf/tracer (TS 5.4.5, pnpm monorepo)** — 203 declarations; cross-check on a *different compiler version* than TypeMeter's own dev dependency:
+
+```
+  TypeMeter sweep 60,168 inst · 18,983 types
+  full tsc run   100,887 inst · 25,872 types (sweep triggers 59.6% / 73.4% of it)
+  cold-start on project files: tsc check 1,098 ms vs TypeMeter first-touch 753 ms + program 1,132 ms
+  most expensive interface: Message (src/messages.ts) — 37.6 ms · 8,496 inst · 2,176 typ · grade E
+```
+
+**type-fest (TS 5.9.3, 440 files, 2,838 declarations)** — the sweep surfaced a type-level explosion that `tsc` cannot even finish checking on this machine:
+
+```
+ 11,323 ms 2,555,221 inst 1,513,367 typ  E  WideTest   test-d/int-range.ts:21
+  1,561 ms   516,729 inst   506,549 typ  E  Int0_998   test-d/int-closed-range.ts:17
+```
+
+The full `tsc --noEmit` check of the same tree dies with *JavaScript heap out of memory* and is SIGKILLed by the OOM killer; TypeMeter's declaration sweep completed and names the exact declaration responsible for the 11-second explosion.
+
+### Version accuracy (correctness fix)
+
+`SyntaxKind` enum values shift between TypeScript releases (+1 between 5.4 and 5.5). A program built with one version's compiler, walked with another version's predicates, silently matches *nothing* — a TS 5.4 project measured with mismatched instances returns **0 declarations**. All AST predicates and TypeFlags reads now run through the project's resolved TypeScript module, so version accuracy holds end-to-end (this is exactly the class of bug the tracer itself exists to hunt).
 
 ## How it works
 
