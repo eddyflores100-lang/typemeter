@@ -42,8 +42,15 @@ curl -s -X POST "${upload_url}?name=typemeter-0.1.0.vsix" \
   --data-binary @"$VSIX" | python3 -c "import json,sys; d=json.load(sys.stdin); print('  asset:', d.get('browser_download_url', d))"
 
 echo "== 4. submission issue en tsperf/tracer =="
-curl -s -X POST "https://$GH/repos/tsperf/tracer/issues" \
-  -H "Authorization: token $PAT" -H "Accept: application/vnd.github+json" \
-  -d "{\"title\":\"TSPerf challenge submission: TypeMeter — compiler-level type load-time, complexity AND cost attribution\",\"body\":\"${SUBMISSION_BODY}\"}" \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); print('  issue:', d.get('html_url', d))"
+PAT="$PAT" python3 <<'PY'
+import json, os, urllib.request
+pat = os.environ['PAT']
+body = open('/home/z/my-project/scripts/typemeter/SUBMISSION.md').read().split('\n', 1)[1]
+data = json.dumps({"title": "TSPerf challenge submission: TypeMeter — compiler-level type load-time, complexity AND cost attribution", "body": body}).encode()
+req = urllib.request.Request("https://api.github.com/repos/tsperf/tracer/issues",
+    data=data, method="POST",
+    headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github+json", "Content-Type": "application/json"})
+with urllib.request.urlopen(req) as r:
+    print("  issue:", json.load(r)["html_url"])
+PY
 echo "LISTO."
